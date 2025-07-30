@@ -1,0 +1,46 @@
+# Node modules
+node_modules/
+
+# Build output
+dist/
+.next/
+out/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Environment files
+.env
+.env.*
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Misc
+*.log
+*.tgz
+*.zip
+*.bak
+*.tmp
+
+# Dependency directories
+bower_components/
+
+# Coverage
+coverage/
+
+# Test output
+junit.xml
+
+# Local uploads (optional, comment out if you want to keep uploads in git)
+uploads/
