@@ -1,107 +1,63 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
 
-@layer base {
-  :root {
-    --background: 255 255 255;
-    --foreground: 0 0 0;
-    --card: 255 255 255;
-    --card-foreground: 0 0 0;
-    --popover: 255 255 255;
-    --popover-foreground: 0 0 0;
-    --primary: 0 0 0;
-    --primary-foreground: 255 255 255;
-    --secondary: 245 245 245;
-    --secondary-foreground: 0 0 0;
-    --muted: 245 245 245;
-    --muted-foreground: 115 115 115;
-    --accent: 245 245 245;
-    --accent-foreground: 0 0 0;
-    --destructive: 239 68 68;
-    --destructive-foreground: 255 255 255;
-    --border: 0 0 0;
-    --input: 229 229 229;
-    --ring: 0 0 0;
-    --radius: 0.75rem;
-  }
 
-  .dark {
-    --background: 0 0 0;
-    --foreground: 255 255 255;
-    --card: 0 0 0;
-    --card-foreground: 255 255 255;
-    --popover: 0 0 0;
-    --popover-foreground: 255 255 255;
-    --primary: 255 255 255;
-    --primary-foreground: 0 0 0;
-    --secondary: 38 38 38;
-    --secondary-foreground: 255 255 255;
-    --muted: 38 38 38;
-    --muted-foreground: 163 163 163;
-    --accent: 38 38 38;
-    --accent-foreground: 255 255 255;
-    --destructive: 239 68 68;
-    --destructive-foreground: 255 255 255;
-    --border: 255 255 255;
-    --input: 38 38 38;
-    --ring: 255 255 255;
-  }
+html, body {
+  background-color: #fff !important;
+  color: #000 !important;
+  min-height: 100vh;
+  margin: 0;
+  padding: 0;
+  transition: background-color 0.3s, color 0.3s;
 }
 
-@layer base {
-  * {
-    @apply border-border;
-  }
-  body {
-    @apply bg-background text-foreground;
-  }
+.dark html, .dark body {
+  background-color: #000 !important;
+  color: #fff !important;
 }
 
-/* Ensure proper text contrast in dark mode */
-.dark .user-message {
-  @apply bg-primary text-primary-foreground;
-}
+/* Utility classes for strict black/white UI */
+.bg-white { background-color: #fff !important; }
+.bg-black { background-color: #000 !important; }
+.text-white { color: #fff !important; }
+.text-black { color: #000 !important; }
+.border-black { border-color: #000 !important; }
+.border-white { border-color: #fff !important; }
+.border { border-width: 1px; border-style: solid; }
+.transition-colors { transition-property: background-color, color, border-color; transition-duration: 0.3s; }
+.duration-300 { transition-duration: 0.3s; }
 
-.dark .assistant-message {
-  @apply bg-card text-card-foreground border-border;
-}
-
-/* Custom scrollbar */
-::-webkit-scrollbar {
-  width: 8px;
-}
-
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
+/* Scrollbar styles: strict black/white */
 ::-webkit-scrollbar-thumb {
-  background: rgb(203 213 225);
+  background: #000;
   border-radius: 4px;
 }
-
 ::-webkit-scrollbar-thumb:hover {
-  background: rgb(148 163 184);
+  background: #222;
 }
-
 .dark ::-webkit-scrollbar-thumb {
-  background: rgb(71 85 105);
+  background: #fff;
 }
-
 .dark ::-webkit-scrollbar-thumb:hover {
-  background: rgb(100 116 139);
+  background: #ccc;
 }
 
-/* Ensure proper focus states */
+/* Focus states: strict white/black ring */
+input:focus,
+textarea:focus,
+button:focus {
+  outline: 2px solid #000;
+}
 .dark input:focus,
 .dark textarea:focus,
 .dark button:focus {
-  @apply ring-ring;
+  outline: 2px solid #fff;
 }
 
-/* Ensure proper placeholder text */
+/* Placeholder text: strict gray for contrast */
+input::placeholder,
+textarea::placeholder {
+  color: #888;
+}
 .dark input::placeholder,
 .dark textarea::placeholder {
-  @apply text-muted-foreground;
+  color: #bbb;
 }

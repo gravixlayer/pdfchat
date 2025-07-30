@@ -1,7 +1,7 @@
 import type React from "react"
 import type { Metadata } from "next"
 import { Inter } from "next/font/google"
-import "./globals.css"
+import "../styles/globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
 import { Toaster } from "@/components/ui/toaster"
 
@@ -20,11 +20,18 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={inter.className}>
-        <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false} disableTransitionOnChange={false}>
-          {children}
-          <Toaster />
-        </ThemeProvider>
+      <body className={`${inter.className} min-h-screen bg-white text-black dark:bg-black dark:text-white transition-colors duration-300`}>
+        <div className="transition-colors duration-300">
+          <ThemeProvider
+            attribute="class"
+            defaultTheme="system"
+            enableSystem={true}
+            disableTransitionOnChange={true}
+          >
+            {children}
+            <Toaster />
+          </ThemeProvider>
+        </div>
       </body>
     </html>
   )
