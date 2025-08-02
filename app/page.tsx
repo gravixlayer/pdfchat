@@ -82,25 +82,61 @@ export default function PlaygroundChatbot() {
     }
   }, [messages]);
 
-  // Clear chat and uploaded files on tab close/reload
-  useEffect(() => {
-    const handleUnload = async () => {
-      setMessages([
-        {
-          id: "system",
-          role: "system",
-          content: "You are a helpful AI assistant. Ensure to structure the answers with clear headings and bullet points.",
-        },
-      ]);
-      setUploadedFiles([]);
-      // Optionally, call backend to delete vectors for this session/user
-      try {
-        await fetch("/api/cleanup", { method: "POST" });
-      } catch {}
-    };
-    window.addEventListener("beforeunload", handleUnload);
-    return () => window.removeEventListener("beforeunload", handleUnload);
-  }, []);
+
+
+useEffect(() => {
+  const handleCleanup = async () => {
+    console.debug('[Cleanup] Starting cleanup on page refresh/unload');
+    
+    // Reset local state
+    setMessages([
+      {
+        id: "system",
+        role: "system",
+        content: "You are a helpful AI assistant. Ensure to structure the answers with clear headings and bullet points.",
+      },
+    ]);
+    setUploadedFiles([]);
+    
+    // Call cleanup APIs
+    try {
+      console.debug('[Cleanup] Calling cleanup API...');
+      const response = await fetch("/api/cleanup", { 
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        }
+      });
+      
+      const result = await response.json();
+      console.debug('[Cleanup] API Response:', result);
+      
+      if (!response.ok) {
+        console.error('[Cleanup] Failed:', result.error);
+      } else {
+        console.debug('[Cleanup] Successfully cleared:', {
+          uploads: result.uploads,
+          documentStore: result.documentStore,
+          idleCleaned: result.idleCleaned
+        });
+      }
+    } catch (error) {
+      console.error('[Cleanup] Error during cleanup:', error);
+    }
+  };
+
+  // Call cleanup on component mount
+  handleCleanup();
+
+  // Add event listener for page refresh/unload
+  window.addEventListener("beforeunload", handleCleanup);
+  
+  // Cleanup event listener on component unmount
+  return () => window.removeEventListener("beforeunload", handleCleanup);
+}, []); // Empty dependency array means this runs once on mount
+
+
+
 
   // Handler for copying message content
   const handleCopyMessage = (content: string) => {

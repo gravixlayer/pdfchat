@@ -14,17 +14,26 @@ interface DocumentData {
   createdAt: string
 }
 
-// Global document storage using globalThis
-declare global {
-  var documentStore: Map<string, DocumentData> | undefined
+// Session metadata for idle tracking
+interface SessionMeta {
+  lastActivity: number // timestamp (ms)
 }
 
-// Initialize document storage
-function getDocumentStore(): Map<string, DocumentData> {
-  if (!globalThis.documentStore) {
-    globalThis.documentStore = new Map<string, DocumentData>()
+// Global document storage and session meta using globalThis
+function getDocumentStore(): Map<string, Map<string, DocumentData>> {
+  const anyGlobal = globalThis as any
+  if (!anyGlobal.documentStore) {
+    anyGlobal.documentStore = new Map<string, Map<string, DocumentData>>()
   }
-  return globalThis.documentStore
+  return anyGlobal.documentStore as Map<string, Map<string, DocumentData>>
+}
+
+function getSessionMetaStore(): Map<string, SessionMeta> {
+  const anyGlobal = globalThis as any
+  if (!anyGlobal.sessionMetaStore) {
+    anyGlobal.sessionMetaStore = new Map<string, SessionMeta>()
+  }
+  return anyGlobal.sessionMetaStore as Map<string, SessionMeta>
 }
 
 // Simple text chunking function with limits and validation
@@ -118,6 +127,15 @@ async function generateEmbeddings(texts: string[]): Promise<number[][]> {
 
       for (const text of batch) {
         try {
+          console.log("[DEBUG] Fetching Gravixlayer embeddings API", {
+            url: "https://api.gravixlayer.com/v1/inference/embeddings",
+            apiKeyPresent: !!process.env.GRAVIXLAYER_API_KEY,
+            inputLength: batch.length,
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${process.env.GRAVIXLAYER_API_KEY}`,
+            },
+          });
           const response = await fetch("https://api.gravixlayer.com/v1/inference/embeddings", {
             method: "POST",
             headers: {
@@ -189,9 +207,10 @@ async function extractTextFromPDF(filepath: string): Promise<string> {
 export async function POST(request: NextRequest) {
   const processingStart = Date.now()
   try {
-    const { fileId, filename, filepath, fileType } = await request.json()
-    if (!fileId || !filename || !filepath || !fileType) {
-      return NextResponse.json({ error: "Missing file metadata" }, { status: 400 })
+
+    const { sessionId, fileId, filename, filepath, fileType } = await request.json()
+    if (!sessionId || !fileId || !filename || !filepath || !fileType) {
+      return NextResponse.json({ error: "Missing file metadata or sessionId" }, { status: 400 })
     }
 
     let text = ""
@@ -224,6 +243,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Failed to generate embeddings", details: embeddingError?.message }, { status: 500 })
     }
 
+
+    // Store document data under sessionId
     const documentData: DocumentData = {
       fileId,
       filename,
@@ -234,7 +255,16 @@ export async function POST(request: NextRequest) {
 
     try {
       const documentStore = getDocumentStore()
-      documentStore.set(fileId, documentData)
+      if (!documentStore.has(sessionId)) {
+        documentStore.set(sessionId, new Map<string, DocumentData>())
+      }
+      const sessionMap = documentStore.get(sessionId)
+      if (sessionMap) {
+        sessionMap.set(fileId, documentData)
+      }
+      // Update session meta last activity
+      const sessionMetaStore = getSessionMetaStore()
+      sessionMetaStore.set(sessionId, { lastActivity: Date.now() })
     } catch (storageError: any) {
       return NextResponse.json({ error: "Failed to store document", details: storageError?.message }, { status: 500 })
     }

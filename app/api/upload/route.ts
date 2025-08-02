@@ -1,4 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
+import { cookies } from "next/headers"
 import { writeFile, mkdir } from "fs/promises"
 import { existsSync } from "fs"
 import path from "path"
@@ -16,6 +17,14 @@ const ALLOWED_TYPES = [
 
 export async function POST(request: NextRequest) {
   try {
+
+    // Get sessionId from cookie or generate a new one
+    let sessionId = cookies().get("sessionId")?.value
+    if (!sessionId) {
+      sessionId = crypto.randomUUID()
+      cookies().set("sessionId", sessionId, { httpOnly: true, sameSite: "lax", path: "/" })
+    }
+
     const formData = await request.formData()
     const file = formData.get("file") as File
 
@@ -52,10 +61,11 @@ export async function POST(request: NextRequest) {
       console.log("Created uploads directory:", uploadsDir)
     }
 
-    // Generate unique filename
+
+    // Generate unique filename with sessionId prefix for tracking
     const fileId = uuidv4()
     const extension = path.extname(file.name)
-    const filename = `${fileId}${extension}`
+    const filename = `${sessionId}__${fileId}${extension}`
     const filepath = path.join(uploadsDir, filename)
 
     console.log("Saving file to:", filepath)
@@ -77,16 +87,22 @@ export async function POST(request: NextRequest) {
       )
     }
 
+
     // Process the document
     console.log("Starting document processing...")
     let processResult
     try {
-      const processResponse = await fetch(`${request.nextUrl.origin}/api/process-document`, {
+      // Use internal base URL for server-side fetches to avoid SSL errors on Render
+      const baseUrl = process.env.INTERNAL_BASE_URL || "http://localhost:10000"
+      console.log("[DEBUG] Using baseUrl for internal fetch:", baseUrl)
+
+      const processResponse = await fetch(`${baseUrl}/api/process-document`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
+          sessionId,
           fileId,
           filename: file.name,
           filepath,

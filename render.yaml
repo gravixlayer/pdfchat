@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: pdfchat-web
+    env: node
+    repo: https://github.com/rupinajay/pdfchat
+    branch: main
+    buildCommand: pnpm install && pnpm build
+    startCommand: pnpm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: GRAVIXLAYER_API_KEY
+        value: set-in-render-dashboard # Set the real value in the Render dashboard, not in version control
+    plan: starter
+    autoDeploy: true
