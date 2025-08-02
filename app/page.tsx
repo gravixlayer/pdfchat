@@ -387,7 +387,12 @@ useEffect(() => {
 
             </div>
 
-            {/* Sidebar Footer: (Removed user info and quick actions) */}
+            {/* Sidebar Footer: Disclaimer */}
+            <div className="px-8 pb-8 pt-4 mt-auto">
+              <div className="bg-neutral-100 border border-neutral-200 rounded-xl p-4 text-xs text-neutral-500 leading-relaxed shadow-sm">
+                <span className="font-semibold text-neutral-700">Disclaimer:</span> We do not store or save your files or data. All uploaded documents and chat history are <span className="font-semibold text-neutral-700">cleared as soon as you leave or refresh this site</span>. Your privacy and security are our priority.
+              </div>
+            </div>
           </>
         )}
       </div>
@@ -399,8 +404,8 @@ useEffect(() => {
         <div className="bg-white pt-8 pb-4 border-b border-neutral-200/80 shadow-sm">
           <div className="flex items-center justify-between px-8">
             <div className="flex flex-col gap-1">
-              <h2 className="text-2xl font-extrabold tracking-tight text-neutral-900 leading-tight">Playground</h2>
-              <span className="text-xs text-neutral-500 font-semibold tracking-widest uppercase">AI Chat & RAG</span>
+              {/* Removed 'Playground' heading as requested */}
+              <span className="text-xs text-neutral-500 font-semibold tracking-widest uppercase"><span className="font-extrabold text-neutral-900">PDFCHAT</span>: Chat with your documents</span>
             </div>
             <div className="flex items-center gap-4">
               {isLoading && (
@@ -421,7 +426,7 @@ useEffect(() => {
               <div className="w-20 h-20 bg-white rounded-2xl flex items-center justify-center mx-auto mb-6 border border-neutral-200 shadow-sm">
                 <MessageSquare className="h-8 w-8 text-neutral-700" />
               </div>
-              <h3 className="text-xl font-bold mb-3 text-neutral-900">Welcome to AI Playground</h3>
+              {/* Removed 'Welcome to AI Playground' heading as requested */}
               <p className="text-sm text-neutral-500 mb-6 max-w-md mx-auto">
                 Start a conversation with our advanced AI assistant. Upload documents to enable RAG-powered responses.
               </p>
