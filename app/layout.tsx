@@ -8,9 +8,9 @@ import { Toaster } from "@/components/ui/toaster"
 const inter = Inter({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
-  title: "Gravix Layer - AI Playground",
-  description: "AI-powered chatbot playground",
-    generator: 'v0.dev'
+  title: "Gravix Layer - PDFCHAT",
+  description: "AI-powered chatbot",
+    // generator field removed as it is not needed
 }
 
 export default function RootLayout({
