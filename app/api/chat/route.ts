@@ -15,13 +15,13 @@ interface DocumentData {
 
 // Global document storage using globalThis
 declare global {
-  var documentStore: Map<string, DocumentData> | undefined
+  var documentStore: Map<string, Map<string, DocumentData>> | undefined
 }
 
 // Initialize document storage
-function getDocumentStore(): Map<string, DocumentData> {
+function getDocumentStore(): Map<string, Map<string, DocumentData>> {
   if (!globalThis.documentStore) {
-    globalThis.documentStore = new Map<string, DocumentData>()
+    globalThis.documentStore = new Map<string, Map<string, DocumentData>>()
   }
   return globalThis.documentStore
 }
@@ -136,10 +136,10 @@ function generateSingleDummyEmbedding(): number[] {
   }
 }
 
-// Retrieve relevant chunks with better validation
-function retrieveRelevantChunks(queryEmbedding: number[], documents: Map<string, DocumentData>, topK = 3): string[] {
+// Retrieve relevant chunks with context (previous and next chunks)
+function retrieveRelevantChunks(queryEmbedding: number[], sessionDocuments: Map<string, DocumentData>, topK = 3): string[] {
   try {
-    if (!documents || documents.size === 0) {
+    if (!sessionDocuments || sessionDocuments.size === 0) {
       console.log("No documents available for retrieval")
       return []
     }
@@ -149,9 +149,9 @@ function retrieveRelevantChunks(queryEmbedding: number[], documents: Map<string,
       return []
     }
 
-    const allChunks: { chunk: string; similarity: number }[] = []
+    const allChunks: { chunk: string; similarity: number; chunkIndex: number; docChunks: string[] }[] = []
 
-    for (const doc of documents.values()) {
+    for (const doc of sessionDocuments.values()) {
       if (!doc || !doc.chunks || !doc.embeddings) {
         console.warn("Document missing chunks or embeddings")
         continue
@@ -171,7 +171,12 @@ function retrieveRelevantChunks(queryEmbedding: number[], documents: Map<string,
         if (typeof chunk === "string" && chunk.trim().length > 0 && Array.isArray(chunkEmbedding)) {
           const similarity = cosineSimilarity(queryEmbedding, chunkEmbedding)
           if (similarity > 0) {
-            allChunks.push({ chunk: chunk.trim(), similarity })
+            allChunks.push({ 
+              chunk: chunk.trim(), 
+              similarity, 
+              chunkIndex: i,
+              docChunks: doc.chunks
+            })
           }
         }
       }
@@ -183,11 +188,36 @@ function retrieveRelevantChunks(queryEmbedding: number[], documents: Map<string,
       return []
     }
 
-    // Sort by similarity and return top K
-    return allChunks
+    // Sort by similarity and get top matches
+    const topMatches = allChunks
       .sort((a, b) => b.similarity - a.similarity)
-      .slice(0, Math.max(1, Math.min(topK, 10))) // Ensure reasonable bounds
-      .map((item) => item.chunk)
+      .slice(0, Math.max(1, Math.min(topK, 5))) // Limit to prevent too much context
+
+    // Build chunks with context (previous and next chunks)
+    const contextualChunks: string[] = []
+    
+    for (const match of topMatches) {
+      const { chunkIndex, docChunks } = match
+      const contextChunks: string[] = []
+
+      // Add previous chunk if available
+      if (chunkIndex > 0 && docChunks[chunkIndex - 1]) {
+        contextChunks.push(`[Previous Context]: ${docChunks[chunkIndex - 1].trim()}`)
+      }
+
+      // Add the main matching chunk
+      contextChunks.push(`[Main Content]: ${match.chunk}`)
+
+      // Add next chunk if available
+      if (chunkIndex < docChunks.length - 1 && docChunks[chunkIndex + 1]) {
+        contextChunks.push(`[Following Context]: ${docChunks[chunkIndex + 1].trim()}`)
+      }
+
+      contextualChunks.push(contextChunks.join('\n\n'))
+    }
+
+    console.log(`Returning ${contextualChunks.length} contextual chunks with surrounding context`)
+    return contextualChunks
   } catch (error) {
     console.error("Error retrieving relevant chunks:", error)
     return []
@@ -196,7 +226,7 @@ function retrieveRelevantChunks(queryEmbedding: number[], documents: Map<string,
 
 export async function POST(req: NextRequest) {
   try {
-    const { messages, model = "llama3.1:8b", temperature = 0.7, maxTokens = 1000, useRAG = false } = await req.json()
+    const { messages, model = "llama3.1:8b", temperature = 0.7, maxTokens = 1000, useRAG = false, sessionId: bodySessionId } = await req.json()
 
     // Validate API key
     if (!process.env.GRAVIXLAYER_API_KEY) {
@@ -215,28 +245,61 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    // Get sessionId from cookie
-    const sessionId = cookies().get("sessionId")?.value
-    console.log("[DEBUG] Chat API sessionId:", sessionId)
+    // Get sessionId from cookie or request body
+    const allCookies = cookies().getAll()
+    console.log("[DEBUG] All cookies:", allCookies.map(c => `${c.name}=${c.value}`))
+    const cookieSessionId = cookies().get("sessionId")?.value
+    const sessionId = cookieSessionId || bodySessionId
+    console.log("[DEBUG] Chat API sessionId from cookie:", cookieSessionId)
+    console.log("[DEBUG] Chat API sessionId from body:", bodySessionId)
+    console.log("[DEBUG] Final sessionId:", sessionId)
 
     let processedMessages = messages
 
     // If RAG is enabled and we have documents, retrieve relevant context
     if (useRAG) {
       console.log("RAG enabled, checking for documents...")
-
+      
       try {
         const documentStore = getDocumentStore()
-        let sessionDocs: Map<string, any> | undefined = undefined
+        console.log("[DEBUG] Document store size:", documentStore.size)
+        console.log("[DEBUG] Session documents for", sessionId, ":", sessionId && documentStore.has(sessionId) ? documentStore.get(sessionId)?.size || 0 : 0)
+        console.log("[DEBUG] All session keys:", Array.from(documentStore.keys()))
+        
+        let sessionDocs: Map<string, DocumentData> | undefined = undefined
+        
+        // Try to get documents for the current session first
         if (sessionId && documentStore.has(sessionId)) {
-          const possibleMap = documentStore.get(sessionId)
-          if (possibleMap && typeof possibleMap === "object" && typeof (possibleMap as unknown as Map<string, any>).keys === "function") {
-            sessionDocs = possibleMap as unknown as Map<string, any>
-          } else {
-            console.warn("[DEBUG] sessionDocs is not a Map, skipping RAG for this session.")
+          sessionDocs = documentStore.get(sessionId)
+          console.log(`Found ${sessionDocs?.size || 0} documents in current session ${sessionId}`)
+        }
+        
+        // If no documents found for current session OR no sessionId, consolidate from all sessions
+        if ((!sessionDocs || sessionDocs.size === 0) && documentStore.size > 0) {
+          console.log("No documents found for current session, consolidating from all sessions...")
+          sessionDocs = new Map<string, DocumentData>()
+          
+          // Combine all documents from all sessions
+          for (const [storedSessionId, storedDocs] of documentStore.entries()) {
+            if (storedDocs && storedDocs.size > 0) {
+              console.log(`Consolidating ${storedDocs.size} documents from session ${storedSessionId}`)
+              // Copy all documents to our working session
+              for (const [docId, docData] of storedDocs.entries()) {
+                sessionDocs.set(docId, docData)
+              }
+            }
+          }
+          
+          // Store consolidated documents in current session (if we have a sessionId)
+          if (sessionId && sessionDocs.size > 0) {
+            documentStore.set(sessionId, sessionDocs)
+            console.log(`Consolidated ${sessionDocs.size} documents into session ${sessionId}`)
           }
         }
-        console.log("[DEBUG] Document store for session:", sessionDocs ? Array.from(sessionDocs.keys()) : null)
+        
+        console.log("[DEBUG] Document store size:", documentStore.size)
+        console.log("[DEBUG] Session documents for", sessionId, ":", sessionDocs ? sessionDocs.size : 0)
+        console.log("[DEBUG] All session keys:", Array.from(documentStore.keys()).slice(0, 5))
 
         if (sessionDocs && sessionDocs.size > 0) {
           const lastUserMessage = messages.filter((m) => m.role === "user").pop()
@@ -334,14 +397,68 @@ ${relevantChunks.join("\n\n---\n\n")}`,
       )
     }
 
-    // Return the streaming response
-    return new Response(response.body, {
-      headers: {
-        "Content-Type": "text/plain; charset=utf-8",
-        "Cache-Control": "no-cache",
-        Connection: "keep-alive",
+    console.log("Response ok, setting up stream...")
+    console.log("Response headers:", Object.fromEntries(response.headers.entries()))
+
+    // Create a streaming response with proper flushing
+    const encoder = new TextEncoder()
+    const decoder = new TextDecoder()
+
+    const stream = new ReadableStream({
+      async start(controller) {
+        const reader = response.body?.getReader()
+        if (!reader) {
+          controller.close()
+          return
+        }
+
+        try {
+          let buffer = ""
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+
+            const chunk = decoder.decode(value, { stream: true })
+            buffer += chunk
+
+            // Process complete lines
+            const lines = buffer.split('\n')
+            buffer = lines.pop() || ""
+
+            for (const line of lines) {
+              if (line.trim()) {
+                // Forward each line immediately
+                console.log("Streaming chunk:", line.substring(0, 50) + "...")
+                controller.enqueue(encoder.encode(line + '\n'))
+              }
+            }
+          }
+
+          // Send remaining buffer
+          if (buffer.trim()) {
+            console.log("Final chunk:", buffer.substring(0, 50) + "...")
+            controller.enqueue(encoder.encode(buffer + '\n'))
+          }
+        } catch (error) {
+          console.error("Stream error:", error)
+          controller.error(error)
+        } finally {
+          controller.close()
+        }
       },
     })
+
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache, no-transform",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no", // Disable nginx buffering
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS", 
+        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      },
+    });
   } catch (error) {
     console.error("Chat API Error:", error)
     const errorMessage = error instanceof Error ? error.message : "Unknown error occurred"

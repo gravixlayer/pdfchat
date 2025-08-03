@@ -1,618 +1,757 @@
-"use client"
 
-import type React from "react"
-import { useState, useRef, useEffect } from "react"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { Badge } from "@/components/ui/badge"
-import { Slider } from "@/components/ui/slider"
-import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Textarea } from "@/components/ui/textarea"
-import { Switch } from "@/components/ui/switch"
-import { Progress } from "@/components/ui/progress"
-import ReactMarkdown from "react-markdown"
+"use client";
 
-
-import {
-  Send,
-  Bot,
-  User,
-  Trash2,
-  Copy,
-  Upload,
-  FileText,
-  X,
-  AlertTriangle,
-  Settings,
-  Sparkles,
-  Zap,
-  Brain,
-  MessageSquare,
-  FileUp,
-  Cpu,
-  Gauge,
-  Database,
-  CheckCircle,
-  Clock,
-  Download,
-  LogOut,
-} from "lucide-react"
-import { toast } from "@/hooks/use-toast"
-import { ThemeToggle } from "@/components/theme-toggle"
-
-
+import React, { useState, useRef, useEffect } from "react";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import ReactMarkdown from "react-markdown";
+import { toast } from "@/hooks/use-toast";
 
 interface Message {
-  id: string
-  role: "user" | "assistant" | "system"
-  content: string
-  timestamp?: string
+  id: string;
+  role: "user" | "assistant" | "system";
+  content: string;
+  timestamp?: string;
 }
 
-export default function PlaygroundChatbot() {
-  // ...existing state and hooks...
-  const [model, setModel] = useState("llama3.1:8b")
-  const [temperature, setTemperature] = useState([0.7])
-  const [maxTokens, setMaxTokens] = useState([1000])
-  const [systemPrompt, setSystemPrompt] = useState("You are a helpful AI assistant.")
-  const [useRAG, setUseRAG] = useState(false)
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: "system",
-      role: "system",
-      content: "You are a helpful AI assistant. Ensure to structure the answers with clear headings and bullet points.",
-    },
-  ])
-  const [input, setInput] = useState("")
-  const [isLoading, setIsLoading] = useState(false)
-  const [uploadedFiles, setUploadedFiles] = useState<any[]>([])
-  const [isUploading, setIsUploading] = useState(false)
-  const [uploadProgress, setUploadProgress] = useState(0)
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  const [sidebarOpen, setSidebarOpen] = useState(true)
-  const messagesEndRef = useRef<HTMLDivElement>(null)
-
-  // Auto-scroll to bottom when messages change (especially during streaming)
-  useEffect(() => {
-    if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [messages]);
-
-
-
-useEffect(() => {
-  const handleCleanup = async () => {
-    console.debug('[Cleanup] Starting cleanup on page refresh/unload');
-    
-    // Reset local state
-    setMessages([
-      {
-        id: "system",
-        role: "system",
-        content: "You are a helpful AI assistant. Ensure to structure the answers with clear headings and bullet points.",
-      },
-    ]);
-    setUploadedFiles([]);
-    
-    // Call cleanup APIs
-    try {
-      console.debug('[Cleanup] Calling cleanup API...');
-      const response = await fetch("/api/cleanup", { 
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        }
-      });
-      
-      const result = await response.json();
-      console.debug('[Cleanup] API Response:', result);
-      
-      if (!response.ok) {
-        console.error('[Cleanup] Failed:', result.error);
-      } else {
-        console.debug('[Cleanup] Successfully cleared:', {
-          uploads: result.uploads,
-          documentStore: result.documentStore,
-          idleCleaned: result.idleCleaned
-        });
-      }
-    } catch (error) {
-      console.error('[Cleanup] Error during cleanup:', error);
-    }
-  };
-
-  // Call cleanup on component mount
-  handleCleanup();
-
-  // Add event listener for page refresh/unload
-  window.addEventListener("beforeunload", handleCleanup);
+export default function Page() {
+  const [input, setInput] = useState("");
+  const [selectedModel, setSelectedModel] = useState("llama3.1:8b");
+  const [capsuleWidth, setCapsuleWidth] = useState(80);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [file, setFile] = useState<File | null>(null);
+  const [processedDocs, setProcessedDocs] = useState<{[fileId: string]: {name: string, size: string, status: 'processing' | 'ready'}} | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const uploadControllerRef = useRef<AbortController | null>(null);
+  // Streaming state
+  const [streamingId, setStreamingId] = useState<string | null>(null);
+  const [streamingContent, setStreamingContent] = useState<{[key: string]: string}>({});
   
-  // Cleanup event listener on component unmount
-  return () => window.removeEventListener("beforeunload", handleCleanup);
-}, []); // Empty dependency array means this runs once on mount
-
-
-
-
-  // Handler for copying message content
-  const handleCopyMessage = (content: string) => {
-    navigator.clipboard.writeText(content)
-    toast({
-      title: "Copied!",
-      description: "Message copied to clipboard.",
-    })
-  }
-
-  // Handler for submitting chat input
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!input.trim()) return
-
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      role: "user",
-      content: input,
-      timestamp: new Date().toISOString(),
-    }
-    const trimmedMessages = [...messages, userMessage]
-    setMessages(trimmedMessages)
-    setInput("")
-    setIsLoading(true)
-
-    try {
-      // Always use RAG if any processed document exists
-      const hasProcessedDocs = uploadedFiles.some((f) => f.chunks > 0);
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          messages: trimmedMessages.map((msg) => ({
-            role: msg.role,
-            content: msg.content,
-          })),
-          model,
-          temperature: temperature[0],
-          maxTokens: maxTokens[0],
-          useRAG: hasProcessedDocs,
-        }),
-      })
-
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || `HTTP error! status: ${response.status}`)
-      }
-
-      const reader = response.body?.getReader()
-      if (!reader) {
-        throw new Error("No response body")
-      }
-
-      const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        role: "assistant",
-        content: "",
-        timestamp: new Date().toISOString(),
-      }
-
-      setMessages((prev) => [...prev, assistantMessage])
-
-      const decoder = new TextDecoder()
-      let buffer = ""
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split("\n")
-        buffer = lines.pop() || ""
-
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            const data = line.slice(6)
-            if (data === "[DONE]") continue
-
-            try {
-              const parsed = JSON.parse(data)
-              const content = parsed.choices?.[0]?.delta?.content
-              if (content) {
-                setMessages((prev) =>
-                  prev.map((msg) =>
-                    msg.id === assistantMessage.id ? { ...msg, content: msg.content + content } : msg,
-                  ),
-                )
-              }
-            } catch (e) {
-              // Skip invalid JSON
-            }
+  // Initialize sessionId from cookie on page load
+  useEffect(() => {
+    const getSessionIdFromCookie = () => {
+      if (typeof document !== 'undefined') {
+        const cookies = document.cookie.split(';');
+        for (const cookie of cookies) {
+          const [name, value] = cookie.trim().split('=');
+          if (name === 'sessionId') {
+            return decodeURIComponent(value);
           }
         }
       }
+      return null;
+    };
+    
+    const cookieSessionId = getSessionIdFromCookie();
+    if (cookieSessionId && !sessionId) {
+      console.log("Initializing sessionId from cookie:", cookieSessionId);
+      setSessionId(cookieSessionId);
+    }
+
+    // Initialize cleanup scheduler on first load
+    const initScheduler = async () => {
+      try {
+        await fetch('/api/cleanup-scheduler', { method: 'POST' });
+        console.log("Cleanup scheduler initialized");
+      } catch (error) {
+        console.warn("Failed to initialize cleanup scheduler:", error);
+      }
+    };
+    initScheduler();
+  }, []);
+
+  // Cleanup function
+  const performCleanup = async () => {
+    try {
+      console.log("Performing cleanup...");
+      await fetch('/api/cleanup', {
+        method: 'POST',
+        credentials: 'same-origin',
+      });
     } catch (error) {
-      console.error("Chat error:", error)
-      toast({
-        title: "Error",
-        description: error instanceof Error ? error.message : "Failed to send message.",
-        variant: "destructive",
-      })
-      setMessages((prev) => prev.filter((msg) => msg.id !== userMessage.id))
+      console.warn("Cleanup failed:", error);
+    }
+  };
+
+  // Add cleanup on page unload
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      // Use sendBeacon for reliable cleanup on page unload
+      if (navigator.sendBeacon) {
+        navigator.sendBeacon('/api/cleanup', new FormData());
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        // Page is being hidden/closed, trigger cleanup
+        performCleanup();
+      }
+    };
+
+    // Add event listeners
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // Cleanup on component unmount
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
+  
+  // Set cookie when sessionId changes
+  useEffect(() => {
+    if (sessionId && typeof document !== 'undefined') {
+      document.cookie = `sessionId=${encodeURIComponent(sessionId)}; path=/; max-age=86400; samesite=strict`;
+      console.log("Setting sessionId cookie:", sessionId);
+    }
+  }, [sessionId]);
+  // File upload handler
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    
+    setUploading(true);
+    setFile(f);
+    
+    // Create new AbortController for this upload
+    const controller = new AbortController();
+    uploadControllerRef.current = controller;
+    
+    // Generate unique file ID for this upload (temporary client-side ID)
+    const tempFileId = Date.now().toString() + "-temp-" + Math.random().toString(36).substr(2, 9);
+    
+    // Set initial processing state for this document
+    const fileSize = (f.size / 1024 / 1024).toFixed(1) + ' MB';
+    setProcessedDocs(prev => ({
+      ...prev,
+      [tempFileId]: {
+        name: f.name,
+        size: fileSize,
+        status: 'processing'
+      }
+    }));
+    
+    try {
+      // Process the document
+      const formData = new FormData();
+      formData.append('file', f);
+      
+      console.log("Frontend: Uploading with sessionId:", sessionId);
+      
+      const response = await fetch('/api/upload', {
+        method: 'POST',
+        credentials: 'same-origin',
+        body: formData,
+        signal: controller.signal, // Add abort signal
+      });
+      
+      if (response.ok) {
+        const result = await response.json();
+        console.log("Frontend: Upload response:", result);
+        
+        // Store sessionId for future requests - ALWAYS update sessionId from server response
+        if (result.sessionId) {
+          console.log("Frontend: Updating sessionId from", sessionId, "to", result.sessionId);
+          setSessionId(result.sessionId);
+        }
+        // Document processed successfully - replace temp ID with server ID
+        setProcessedDocs(prev => {
+          if (!prev) return null;
+          const newDocs = { ...prev };
+          // Remove the temporary entry
+          delete newDocs[tempFileId];
+          // Add the final entry with server fileId
+          newDocs[result.fileId] = {
+            name: f.name,
+            size: fileSize,
+            status: 'ready'
+          };
+          return newDocs;
+        });
+        toast({
+          title: "Document Processed",
+          description: `${f.name} is ready for questions.`,
+        });
+      } else {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to process document');
+      }
+    } catch (error) {
+      // Check if the error is due to abort
+      if (error instanceof Error && error.name === 'AbortError') {
+        toast({
+          title: "Upload Cancelled",
+          description: "Document processing was cancelled.",
+        });
+      } else {
+        toast({
+          title: "Upload Error",
+          description: error instanceof Error ? error.message : "Failed to process the document. Please try again.",
+          variant: "destructive",
+        });
+      }
+      // Remove failed document from state (use temp ID)
+      setProcessedDocs(prev => {
+        if (!prev) return null;
+        const newDocs = { ...prev };
+        delete newDocs[tempFileId];
+        return Object.keys(newDocs).length > 0 ? newDocs : null;
+      });
     } finally {
-      setIsLoading(false)
+      setUploading(false);
+      uploadControllerRef.current = null;
     }
   }
 
-  const visibleMessages = messages.filter((m) => m.role !== "system")
-  const hasProcessedFiles = uploadedFiles.some((f) => f.chunks > 0)
+  // Handle document removal/cancellation
+  function handleRemoveDocument(fileId: string) {
+    const docToRemove = processedDocs?.[fileId];
+    if (!docToRemove) return;
+    
+    const isProcessing = docToRemove.status === 'processing';
+    
+    if (isProcessing) {
+      // Cancel the ongoing upload/processing
+      if (uploadControllerRef.current) {
+        uploadControllerRef.current.abort();
+        uploadControllerRef.current = null;
+      }
+      
+      // Reset upload state
+      setUploading(false);
+      setFile(null);
+      
+      toast({
+        title: "Processing Cancelled",
+        description: "Document processing has been cancelled.",
+      });
+    } else {
+      // Document is already processed, do cleanup
+      toast({
+        title: "Document Removed",
+        description: "Document has been removed.",
+      });
+    }
+    
+    // Remove document from state
+    setProcessedDocs(prev => {
+      if (!prev) return null;
+      const newDocs = { ...prev };
+      delete newDocs[fileId];
+      return Object.keys(newDocs).length > 0 ? newDocs : null;
+    });
+    
+    // If no documents left, clear session
+    const remainingDocs = processedDocs ? Object.keys(processedDocs).filter(id => id !== fileId) : [];
+    if (remainingDocs.length === 0) {
+      setSessionId(null);
+    }
+    
+    // Reset file input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  }
 
-  const formatTime = (timestamp?: string) => {
-    if (!timestamp) return ""
-    return new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+  // Simple streaming - just update content directly
+  function updateStreamingContent(id: string, content: string) {
+    setStreamingContent(prev => ({
+      ...prev,
+      [id]: content
+    }));
+  }
+
+  // Auto-scroll to bottom as streaming response updates
+  useEffect(() => {
+    if (streamingId && chatEndRef.current) {
+      setTimeout(() => {
+        chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      }, 0);
+    }
+  }, [streamingContent, streamingId]);
+
+  // Also scroll on messages update (handles edge cases)
+  useEffect(() => {
+    if (chatEndRef.current) {
+      setTimeout(() => {
+        chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      }, 0);
+    }
+  }, [messages]);
+
+  // Auto-resize textarea
+  useEffect(() => {
+    if (inputRef.current) {
+      inputRef.current.style.height = 'auto';
+      inputRef.current.style.height = Math.min(inputRef.current.scrollHeight, 120) + 'px';
+    }
+  }, [input]);
+
+  // Handle key press for input field
+  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSubmit(e as any);
+    }
+  }
+
+  // Chat submit handler
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!input.trim()) return;
+    const allowedModels = [
+      "llama3.1:8b",
+      "qwen3:4b",
+      "gemma3:12b",
+      "qwen2.5vl:7b",
+    ];
+    if (!allowedModels.includes(selectedModel)) {
+      toast({
+        title: "Invalid Model",
+        description: "Please select a valid model.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const userMsg: Message = { id: Date.now().toString(), role: "user", content: input };
+    setMessages((msgs) => [...msgs, userMsg]);
+    setInput("");
+    setTimeout(() => {
+      if (chatEndRef.current) chatEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }, 50);
+
+    try {
+      // Always check if we have processed documents AND a valid sessionId
+      const hasProcessedDocs = processedDocs && Object.values(processedDocs).some(doc => doc.status === 'ready');
+      const shouldUseRAG = hasProcessedDocs && sessionId; // Only use RAG if we have both docs and sessionId
+      
+      console.log("Frontend: Chat request details:", {
+        sessionId,
+        hasProcessedDocs,
+        shouldUseRAG,
+        processedDocsCount: processedDocs ? Object.keys(processedDocs).length : 0
+      });
+      
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin", // Use same-origin for same-domain requests
+        body: JSON.stringify({
+          messages: [...messages, userMsg],
+          model: selectedModel,
+          useRAG: shouldUseRAG,
+          sessionId: sessionId, // Include sessionId explicitly
+        }),
+      });
+      if (!res.ok || !res.body) throw new Error("API error");
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let done = false;
+      
+      // Create assistant message with a fixed ID that won't change
+      const assistantMsgId = Date.now().toString() + "-assistant";
+      let assistantMsg: Message = {
+        id: assistantMsgId,
+        role: "assistant",
+        content: "",
+      };
+      setMessages((msgs) => [...msgs, assistantMsg]);
+      
+      // Initialize streaming for this specific message ID
+      setStreamingId(assistantMsgId);
+      setStreamingContent(prev => ({
+        ...prev,
+        [assistantMsgId]: ""
+      }));
+      
+      let fullReply = "";
+      let buffer = "";
+      
+      // Process streaming response with immediate chunk handling
+      while (!done) {
+        const { value, done: doneReading } = await reader.read();
+        if (value) {
+          const chunk = decoder.decode(value, { stream: !doneReading });
+          buffer += chunk;
+          
+          // Split by newlines to get complete lines
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || ""; // Keep the last incomplete line in buffer
+          
+          for (const line of lines) {
+            const trimmed = line.trim();
+            
+            if (!trimmed) continue;
+            
+            console.log("Frontend received line:", trimmed.substring(0, 100) + "...");
+            
+            // Process SSE format: data: {...}
+            if (trimmed.startsWith("data:")) {
+              const jsonStr = trimmed.replace(/^data:\s*/, "").trim();
+              
+              if (!jsonStr || jsonStr === "[DONE]") {
+                console.log("Stream completed from backend");
+                done = true;
+                break;
+              }
+              
+              try {
+                const parsed = JSON.parse(jsonStr);
+                const delta = parsed.choices?.[0]?.delta;
+                
+                if (delta && typeof delta.content === "string") {
+                  console.log("Streaming content:", JSON.stringify(delta.content));
+                  fullReply += delta.content;
+                  
+                  // Update streaming content directly
+                  updateStreamingContent(assistantMsgId, fullReply);
+                  
+                  // Remove the old comment about streamBuffer
+                  console.log("Current fullReply length:", fullReply.length, "Streaming content updated");
+                }
+              } catch (parseError) {
+                console.log("JSON parse error for line:", trimmed.substring(0, 100));
+                console.error("Parse error:", parseError);
+              }
+            }
+          }
+        }
+        done = doneReading;
+      }
+      
+      // Update final message content after streaming is complete
+      setMessages((msgs) =>
+        msgs.map((msg) =>
+          msg.id === assistantMsgId ? { ...msg, content: fullReply } : msg
+        )
+      );
+      
+      // Clear streaming state
+      setStreamingId(null);
+      setStreamingContent(prev => {
+        const newContent = { ...prev };
+        delete newContent[assistantMsgId];
+        return newContent;
+      });
+    } catch (err) {
+      toast({
+        title: "Error",
+        description: "Failed to get response from the model.",
+        variant: "destructive",
+      });
+    }
+  }
+
+  // Copy message to clipboard
+  async function copyToClipboard(text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast({
+        title: "Copied",
+        description: "Message copied to clipboard.",
+      });
+    } catch (error) {
+      toast({
+        title: "Copy Failed",
+        description: "Failed to copy message to clipboard.",
+        variant: "destructive",
+      });
+    }
   }
 
   return (
-    <div className="h-screen bg-white flex font-sans">
-      {/* Sidebar */}
-      <div
-        className={`${sidebarOpen ? "w-80" : "w-0"} fixed left-0 top-0 h-full transition-all duration-300 border-r border-neutral-200 bg-neutral-50 flex flex-col overflow-hidden shadow-lg z-30`} 
-        style={{ minWidth: sidebarOpen ? '20rem' : 0 }}
-        aria-label="Sidebar navigation"
-      >
-        {sidebarOpen && (
-          <>
-            {/* Logo & App Name */}
-            <div className="p-8 flex items-center justify-start mb-4" style={{ paddingLeft: "3rem" }}>
-              <img
-                src="/gravixlayer.png"
-                alt="Gravix Layer Logo"
-                className="h-20 w-auto object-contain drop-shadow-md"
-                style={{ maxWidth: '220px' }}
-              />
-            {/* End Logo & App Name */}
-            </div>
-
-
-            {/* Navigation Section */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-8">
-              {/* Model Settings Section */}
-              <div>
-                <h2 className="text-xs font-semibold text-neutral-500 mb-2 tracking-widest uppercase">Model Settings</h2>
-                <Card className="bg-neutral-50 border border-neutral-200 rounded-2xl shadow-md transition-shadow hover:shadow-lg">
-                  <CardContent className="flex flex-col gap-6 px-6 py-6">
-                    {/* Model Row */}
-                    <div className="flex flex-col gap-1">
-                      <Label className="text-sm font-bold text-neutral-800 mb-1 tracking-wide">Model</Label>
-                      <Select value={model} onValueChange={setModel}>
-                        <SelectTrigger className="h-11 rounded-xl bg-neutral-100 border-neutral-200 text-neutral-800 w-full shadow-sm focus:ring-2 focus:ring-neutral-200 transition-all">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent className="bg-neutral-50 border-neutral-200 text-neutral-800">
-                          <SelectItem value="llama3.1:8b">Llama 3.1 8B</SelectItem>
-                          <SelectItem value="gemma3:12b">Gemma 3 12B</SelectItem>
-                          <SelectItem value="qwen2.5vl:7b">Qwen2.5VL 7B</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    {/* Temperature Row */}
-                    <div className="flex flex-col gap-1">
-                      <div className="flex items-center justify-between mb-1">
-                        <Label className="text-sm font-bold text-neutral-800">Temperature</Label>
-                        <Badge variant="outline" className="text-xs px-2 py-0 bg-neutral-100 border-neutral-200 text-neutral-700">
-                          {temperature[0]}
-                        </Badge>
-                      </div>
-                      <Slider
-                        value={temperature}
-                        onValueChange={setTemperature}
-                        max={2}
-                        min={0}
-                        step={0.1}
-                        className="w-full text-neutral-700"
-                      />
-                      <span className="text-xs text-neutral-500 mt-1">Controls creativity and randomness</span>
-                    </div>
-                    {/* Max Tokens Row */}
-                    <div className="flex flex-col gap-1">
-                      <div className="flex items-center justify-between mb-1">
-                        <Label className="text-sm font-bold text-neutral-800">Max Tokens</Label>
-                        <Badge variant="outline" className="text-xs px-2 py-0 bg-neutral-100 border-neutral-200 text-neutral-700">
-                          {maxTokens[0]}
-                        </Badge>
-                      </div>
-                      <Slider
-                        value={maxTokens}
-                        onValueChange={setMaxTokens}
-                        max={4000}
-                        min={100}
-                        step={100}
-                        className="w-full text-neutral-700"
-                      />
-                      <span className="text-xs text-neutral-500 mt-1">Maximum response length</span>
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
-
-              {/* Uploaded Documents Section (now below Model Settings) */}
-              <div>
-                <h2 className="text-xs font-semibold text-neutral-500 mb-2 tracking-widest uppercase">Uploaded Documents</h2>
-                <Card className="bg-neutral-50 border border-neutral-200 rounded-2xl shadow-md">
-                  <CardContent className="py-4 px-6">
-                    {uploadedFiles.length === 0 ? (
-                      <div className="flex flex-col items-center space-y-3">
-                        <div className="text-xs text-neutral-400 mb-1">No documents uploaded.</div>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="h-9 px-4 rounded-xl border-neutral-200 text-neutral-700 bg-white hover:bg-neutral-50 shadow-md transition-all w-full"
-                          onClick={() => fileInputRef.current?.click()}
-                          aria-label="Upload documents"
-                        >
-                          <Upload className="h-4 w-4 mr-2" />
-                          <span className="text-sm font-medium">Upload Document</span>
-                        </Button>
-                      </div>
-                    ) : (
-                      <ul className="space-y-3">
-                        {uploadedFiles.map((file, idx) => {
-                          const isProcessing = isUploading && idx === uploadedFiles.length - 1;
-                          return (
-                            <li key={file.name || idx} className="flex items-center gap-2">
-                            <FileText className="h-5 w-5 text-neutral-500" />
-                            <span className="truncate text-sm font-semibold text-neutral-800" title={file.name}>{file.name || `Document ${idx + 1}`}</span>
-                              {isProcessing && (
-                                <span className="flex items-center gap-1 text-xs text-neutral-400 ml-auto">
-                                  <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>
-                                  Processing
-                                </span>
-                              )}
-                              {!isProcessing && file.chunks > 0 && (
-                                <Badge variant="outline" className="text-[11px] px-2 py-0 ml-auto bg-neutral-100 border-neutral-200 text-neutral-700">Processed</Badge>
-                              )}
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    )}
-                  </CardContent>
-                </Card>
-              </div>
-
-              {/* Add more navigation or settings sections here as needed */}
-
-            </div>
-
-            {/* Sidebar Footer: Disclaimer */}
-            <div className="px-8 pb-8 pt-4 mt-auto">
-              <div className="bg-neutral-100 border border-neutral-200 rounded-xl p-4 text-xs text-neutral-500 leading-relaxed shadow-sm">
-                <span className="font-semibold text-neutral-700">Disclaimer:</span> We do not store or save your files or data. All uploaded documents and chat history are <span className="font-semibold text-neutral-700">cleared as soon as you leave or refresh this site</span>. Your privacy and security are our priority.
-              </div>
-            </div>
-          </>
-        )}
-      </div>
-
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col bg-white ml-0 md:ml-80 transition-all duration-300">
-        {/* Top Bar */}
-
-        <div className="bg-white pt-8 pb-4 border-b border-neutral-200/80 shadow-sm">
-          <div className="flex items-center justify-between px-8">
-            <div className="flex flex-col gap-1">
-              {/* Removed 'Playground' heading as requested */}
-              <span className="text-xs text-neutral-500 font-semibold tracking-widest uppercase"><span className="font-extrabold text-neutral-900">PDFCHAT</span>: Chat with your documents</span>
-            </div>
-            <div className="flex items-center gap-4">
-              {isLoading && (
-                <div className="flex items-center gap-2 text-base text-neutral-500 mr-2">
-                  <div className="w-2 h-2 bg-neutral-400 rounded-full animate-pulse"></div>
-                  {useRAG && hasProcessedFiles ? "Searching documents..." : "Generating response..."}
+    <div className="h-screen bg-black font-sans flex flex-col overflow-hidden">
+      {/* Navigation Bar */}
+      <nav className="w-full bg-black border-b border-[#2a2a2a] px-6 py-3 flex-shrink-0">
+        <div className="flex items-center justify-between w-full">
+          {/* Left: Brand */}
+          <div className="text-white text-base font-medium tracking-wide">
+            <span className="text-white">GRAVIX LAYER :</span>
+            <span className="text-white font-bold tracking-tight bg-gradient-to-r from-white to-[#ccc] bg-clip-text text-transparent ml-2">PDFCHAT</span>
           </div>
-        )}
-      </div>
+          
+          {/* Center: Status indicators */}
+          <div className="flex items-center gap-2">
+            {processedDocs && Object.keys(processedDocs).length > 0 && (
+              <div className="flex items-center gap-1 text-xs text-[#888]">
+                <div className="w-1.5 h-1.5 bg-green-500 rounded-full"></div>
+                <span>{Object.keys(processedDocs).length} doc{Object.keys(processedDocs).length !== 1 ? 's' : ''}</span>
+              </div>
+            )}
+          </div>
+          
+          {/* Right: Session status */}
+          <div className="flex items-center gap-2 text-xs text-[#888]">
+            {sessionId && (
+              <>
+                <div className="w-1.5 h-1.5 bg-green-500 rounded-full"></div>
+                <span>Connected</span>
+              </>
+            )}
           </div>
         </div>
-
-        {/* Chat Messages */}
-        <ScrollArea className="flex-1 p-6 bg-white">
-          <div className="max-w-6xl mx-auto space-y-6">
-            {visibleMessages.length === 0 ? (
-              <div className="text-center py-8">
-              <div className="w-20 h-20 bg-white rounded-2xl flex items-center justify-center mx-auto mb-6 border border-neutral-200 shadow-sm">
-                <MessageSquare className="h-8 w-8 text-neutral-700" />
-              </div>
-              {/* Removed 'Welcome to AI Playground' heading as requested */}
-              <p className="text-sm text-neutral-500 mb-6 max-w-md mx-auto">
-                Start a conversation with our advanced AI assistant. Upload documents to enable RAG-powered responses.
-              </p>
-              <div className="flex items-center justify-center gap-6 text-base text-neutral-400">
-                <div className="flex items-center gap-2">
-                  <Sparkles className="h-5 w-5 text-neutral-500" />
-                  <span>AI-Powered</span>
+      </nav>
+      
+      {/* Main Content Area - Only this scrolls */}
+      <div className="flex-1 flex flex-col items-center justify-center px-4 overflow-hidden">
+        {/* Chat Container */}
+        <div className="w-full max-w-3xl flex flex-col h-full overflow-hidden">
+          <ScrollArea className="flex-1 w-full px-2">
+            <div className="flex flex-col gap-6 py-4">
+              {messages.length === 0 ? (
+                /* Welcome Message */
+                <div className="flex flex-col items-center justify-center h-full min-h-[600px] text-center px-8 pt-32">
+                  <div className="space-y-8 max-w-md">
+                    <h1 className="text-2xl font-light text-white">
+                      Hello there!
+                    </h1>
+                    <p className="text-[#888] text-base">
+                      Upload a document and start asking questions
+                    </p>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Database className="h-5 w-5 text-neutral-500" />
-                  <span>RAG Support</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Zap className="h-5 w-5 text-neutral-500" />
-                  <span>Real-time</span>
-                </div>
-              </div>
-              </div>
-            ) : (
-              visibleMessages.map((message) => (
-                <div
-                  key={message.id}
-                  className={
-                    message.role === "user"
-                      ? "flex gap-3 justify-end pr-2 sm:pr-6 md:pr-16 lg:pr-32"
-                      : "flex gap-3 justify-start pl-2 sm:pl-6 md:pl-16 lg:pl-32"
-                  }
-                >
-                  <div
-                    className={`flex gap-3 ${message.role === "user" ? "flex-row-reverse" : "flex-row"} w-full`}
-                    style={{ minWidth: 0 }}
-                  >
-                    <div className="flex-shrink-0">
-                      <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center border border-neutral-200 shadow-sm">
-                        {message.role === "user" ? <User className="h-6 w-6 text-neutral-700" /> : <Bot className="h-6 w-6 text-neutral-700" />}
-                      </div>
-                    </div>
-                    <Card
-                      className="border border-neutral-100 bg-white rounded-3xl shadow-lg transition-shadow hover:shadow-xl w-auto max-w-3xl"
-                    >
-                      <CardContent className="p-5">
-                        <div
-                          className="prose prose-sm max-w-none text-sm leading-relaxed text-neutral-900"
-                        >
-                          <div className="prose max-w-none">
-                            <ReactMarkdown
-                              components={{
-                                p: ({node, ...props}) => <p style={{marginBottom: '0.8em'}} {...props} />,
-                                ul: ({node, ...props}) => <ul style={{marginBottom: '0.8em', paddingLeft: '1.2em'}} {...props} />,
-                                ol: ({node, ...props}) => <ol style={{marginBottom: '0.8em', paddingLeft: '1.2em'}} {...props} />,
-                                li: ({node, ...props}) => <li style={{marginBottom: '0.5em'}} {...props} />,
-                                h1: ({node, ...props}) => <h1 style={{marginTop: '1.2em', marginBottom: '0.6em', fontSize: '1.4em'}} {...props} />,
-                                h2: ({node, ...props}) => <h2 style={{marginTop: '1em', marginBottom: '0.5em', fontSize: '1.2em'}} {...props} />,
-                                h3: ({node, ...props}) => <h3 style={{marginTop: '0.8em', marginBottom: '0.4em', fontSize: '1.1em'}} {...props} />,
-                                br: () => <br />,
-                              }}
-                              skipHtml={false}
-                            >
-                              {message.content}
+              ) : (
+                /* Chat Messages */
+                messages.map((msg) => (
+                  <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`rounded-2xl px-5 py-3 max-w-[75%] text-sm leading-relaxed whitespace-pre-line ${msg.role === 'user' ? 'bg-[#2a2a2a] text-white shadow-sm' : 'bg-[#1a1a1a] text-[#e0e0e0] border border-[#333]'}`}>
+                      {msg.role === 'assistant' ? (
+                        <div>
+                          <div className="prose prose-invert prose-sm max-w-none prose-p:my-2 prose-headings:my-3 prose-ul:my-2 prose-ol:my-2 prose-li:my-0">
+                            <ReactMarkdown>
+                              {streamingId === msg.id ? (streamingContent[msg.id] || "") : msg.content}
                             </ReactMarkdown>
+                            {streamingId === msg.id && streamingContent[msg.id] && (
+                              <span className="inline-block w-2 h-4 bg-green-500 ml-1 animate-pulse"></span>
+                            )}
                           </div>
+                          {/* Copy button at bottom */}
+                          {streamingId !== msg.id && msg.content && (
+                            <div className="flex justify-end mt-3 pt-3 border-t border-[#333]">
+                              <button
+                                onClick={() => copyToClipboard(msg.content)}
+                                className="flex items-center gap-1.5 px-2 py-1 rounded-md text-xs text-[#aaa] hover:text-white hover:bg-[#2a2a2a] transition-colors"
+                                title="Copy message"
+                              >
+                                <svg
+                                  width="12"
+                                  height="12"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                >
+                                  <rect width="14" height="14" x="8" y="8" rx="2" ry="2"/>
+                                  <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>
+                                </svg>
+                                Copy
+                              </button>
+                            </div>
+                          )}
                         </div>
-                        <div className="flex items-center justify-between mt-4 pt-3 border-t border-neutral-100">
-                          <span className="text-xs text-neutral-400">
-                            {formatTime(message.timestamp)}
-                          </span>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-9 w-9 p-0 opacity-60 hover:opacity-100 text-neutral-400 hover:bg-neutral-100 rounded-full transition-all"
-                            onClick={() => handleCopyMessage(message.content)}
-                          >
-                            <Copy className="h-5 w-5" />
-                          </Button>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  </div>
-                </div>
-              ))
-            )}
-            {isLoading && !visibleMessages.some(m => m.role === "assistant" && m.content) && (
-              <div className="flex gap-3 justify-start pl-[10vw]">
-                <div className="flex gap-3 max-w-[98%]">
-                  <div className="flex-shrink-0">
-                    <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center border border-neutral-200 shadow-sm">
-                      <Bot className="h-5 w-5 text-neutral-700" />
+                      ) : (
+                        streamingId === msg.id ? (streamingContent[msg.id] || "") : msg.content
+                      )}
                     </div>
                   </div>
-                  <Card className="bg-white border border-neutral-100 rounded-3xl shadow-lg">
-                    <CardContent className="p-5">
-                      <div className="flex items-center gap-5">
-                        <div className="flex space-x-1">
-                          <div className="w-2 h-2 bg-neutral-700 rounded-full animate-bounce [animation-delay:-0.3s]" />
-                          <div className="w-2 h-2 bg-neutral-700 rounded-full animate-bounce [animation-delay:-0.15s]" />
-                          <div className="w-2 h-2 bg-neutral-700 rounded-full animate-bounce" />
-                        </div>
-                        <span className="text-lg text-neutral-400">
-                          {useRAG && hasProcessedFiles ? "Analyzing documents..." : "Thinking..."}
-                        </span>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </div>
-              </div>
-            )}
-            <div ref={messagesEndRef} />
-          </div>
-        </ScrollArea>
-
-        {/* Input Area */}
-        <div className="bg-white py-2 px-0 border-t border-neutral-200">
-          <div className="max-w-6xl mx-auto">
-            <form onSubmit={handleSubmit} className="flex gap-2 items-center">
-              <div className="flex-1 relative">
-          <Input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder={
-              useRAG && hasProcessedFiles ? "Ask questions about your documents..." : "Type your message..."
-            }
-            disabled={isLoading}
-            className="pr-12 h-9 rounded-xl border border-neutral-200 bg-white focus:bg-neutral-50 transition-colors text-neutral-900 placeholder:text-neutral-500 text-sm shadow-md w-full"
-          />
-          {input.trim() && (
-            <div className="absolute right-3 top-1/2 -translate-y-1/2">
-              <Badge variant="outline" className="text-xs px-2 py-0 bg-white border-neutral-200 text-neutral-700">
-                {input.length}
-              </Badge>
+                ))
+              )}
+              <div ref={chatEndRef} />
             </div>
-          )}
-              </div>
-              <input
-          type="file"
-          accept=".pdf,.txt,.doc,.docx"
-          ref={fileInputRef}
-          style={{ display: 'none' }}
-          multiple
-          onChange={async (e) => {
-            const files = Array.from(e.target.files || []);
-            if (files.length === 0) return;
-            setIsUploading(true);
-            for (const file of files) {
-              setUploadedFiles((prev) => [...prev, { name: file.name, chunks: 0 }]);
-              const formData = new FormData();
-              formData.append('file', file);
-              try {
-                const res = await fetch('/api/upload', {
-            method: 'POST',
-            body: formData,
-                });
-                if (!res.ok) throw new Error('Upload failed');
-                setUploadedFiles((prev) => prev.map((f, i) =>
-            i === prev.length - 1 ? { ...f, chunks: 1 } : f
-                ));
-                setUseRAG(true);
-              } catch (err) {
-                setUploadedFiles((prev) => prev.slice(0, -1));
-                toast({ title: 'Upload failed', description: file.name, variant: 'destructive' });
-              }
-            }
-            setIsUploading(false);
-            if (fileInputRef.current) fileInputRef.current.value = '';
-          }}
-              />
-                <Button
-                type="button"
-                variant="outline"
-                className="h-9 px-2 rounded-xl border-neutral-200 text-neutral-700 bg-white hover:bg-neutral-50 shadow-md transition-all"
-                onClick={() => fileInputRef.current?.click()}
-                aria-label="Upload documents"
-                >
-                <Upload className="h-4 w-4" />
-                </Button>
-                <Button
-                type="submit"
-                disabled={isLoading || !input.trim()}
-                className="h-9 px-5 rounded-xl bg-neutral-900 border border-neutral-900 text-neutral-50 hover:bg-neutral-800 hover:border-neutral-800 shadow-lg transition-all text-sm font-bold"
-                >
-                <Send className="h-4 w-4" />
-                </Button>
-                </form>
-                {/* Removed character count display */}
+          </ScrollArea>
+        </div>
+      </div>
+      {/* Fixed Input Bar */}
+      <div className="w-full bg-black px-4 py-4 flex-shrink-0">
+        <form
+          className="w-full max-w-3xl mx-auto"
+          autoComplete="off"
+          onSubmit={handleSubmit}
+        >
+          <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl px-4 py-3 shadow-lg">
+            {/* Document Preview Box */}
+            {processedDocs && Object.entries(processedDocs).map(([fileId, doc]) => (
+              <div key={fileId} className="mb-3 bg-[#0f0f0f] border border-[#333] rounded-lg px-3 py-2.5 max-w-[240px]">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="flex items-center justify-center w-7 h-7 bg-[#1a1a1a] rounded-md flex-shrink-0">
+                      {doc.status === 'processing' ? (
+                        <div className="w-2.5 h-2.5 border border-[#666] border-t-white rounded-full animate-spin"></div>
+                      ) : (
+                        <svg
+                          width="10"
+                          height="10"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="#4ade80"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <path d="M9 12l2 2 4-4" />
+                          <path d="M21 12c-1 0-3-1-3-3s2-3 3-3 3 1 3 3-2 3-3 3" />
+                          <path d="M3 12c1 0 3-1 3-3s-2-3-3-3-3 1-3 3 2 3 3 3" />
+                        </svg>
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-white text-xs font-medium truncate leading-tight">
+                        {doc.name}
+                      </p>
+                      <p className="text-[#888] text-[10px] mt-0.5">
+                        {doc.size} • {doc.status === 'processing' ? 'Processing...' : 'Ready'}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveDocument(fileId)}
+                    className="flex items-center justify-center w-4 h-4 rounded-full hover:bg-[#333] transition-colors flex-shrink-0 ml-2"
+                    aria-label="Remove document"
+                  >
+                    <svg
+                      width="8"
+                      height="8"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="#888"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M18 6L6 18M6 6l12 12" />
+                    </svg>
+                  </button>
                 </div>
               </div>
+            ))}
+            
+            {/* Input Field */}
+            <textarea
+              ref={inputRef}
+              className="w-full bg-transparent border-none outline-none text-white placeholder-[#888] text-base font-normal resize-none mb-3 min-h-[24px] max-h-[120px] overflow-y-auto"
+              placeholder="Ask me anything..."
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              style={{ caretColor: '#fff' }}
+              autoFocus
+              rows={1}
+            />
+            
+            {/* Controls Row */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                {/* Model Selector */}
+                <div
+                  className="rounded-full bg-[#0f0f0f] border border-[#333] py-1.5 px-3 flex items-center text-[#aaa] text-xs font-normal transition-all duration-200 hover:bg-[#1a1a1a] hover:text-[#ccc] cursor-pointer relative"
+                  style={{ minWidth: 0, width: 'auto', maxWidth: 200 }}
+                  onClick={() => {
+                    const select = document.querySelector('select');
+                    if (select) {
+                      select.focus();
+                      select.click();
+                    }
+                  }}
+                >
+                  <select
+                    className="bg-transparent text-white font-normal outline-none border-none appearance-none cursor-pointer absolute inset-0 w-full h-full opacity-0"
+                    value={selectedModel}
+                    onChange={e => setSelectedModel(e.target.value)}
+                  >
+                    <option value="llama3.1:8b">llama3.1:8b</option>
+                    <option value="qwen3:4b">qwen3:4b</option>
+                    <option value="gemma3:12b">gemma3:12b</option>
+                    <option value="qwen2.5vl:7b">qwen2.5vl:7b</option>
+                  </select>
+                  <span className="text-[#aaa] text-xs font-normal pr-2">{selectedModel}</span>
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="#666"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    style={{ pointerEvents: 'none' }}
+                  >
+                    <path d="M6 9l6 6 6-6" />
+                  </svg>
+                </div>
               </div>
+              
+              <div className="flex items-center gap-2">
+                {/* File Upload */}
+                <button
+                  type="button"
+                  className="flex items-center justify-center w-9 h-9 rounded-lg bg-transparent hover:bg-[#2a2a2a] transition-colors cursor-pointer"
+                  aria-label="Attach file"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploading}
+                >
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="#888"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    style={{ opacity: uploading ? 0.5 : 1 }}
+                  >
+                    <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.9-9.9a4 4 0 015.66 5.66l-9.9 9.9a2 2 0 01-2.83-2.83l8.49-8.49" />
+                  </svg>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".pdf,.txt,.doc,.docx"
+                    className="hidden"
+                    onChange={handleFileChange}
+                    tabIndex={-1}
+                  />
+                </button>
+                
+                {/* Send Button */}
+                <button
+                  type="submit"
+                  className="flex items-center justify-center w-9 h-9 rounded-lg bg-[#2a2a2a] hover:bg-[#333] transition-colors cursor-pointer disabled:opacity-50"
+                  aria-label="Send message"
+                  disabled={input.trim().length === 0 || uploading}
+                >
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="#fff"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M12 19V5M5 12l7-7 7 7" />
+                  </svg>
+                </button>
               </div>
-              )
-            }
+            </div>
+          </div>
+          
+          {/* Disclaimer */}
+          <div className="text-center mt-3">
+            <p className="text-[#666] text-[10px]">
+              <span className="font-medium">Disclaimer:</span> All conversations are processed securely and not stored or retained.
+            </p>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}

@@ -52,8 +52,8 @@ function clearDocumentStoreForSession(sessionId: string) {
   return { cleared: clearedCount }
 }
 
-// Helper to clean up idle sessions (default: 1 hour)
-async function cleanupIdleSessions(idleMs = 60 * 60 * 1000) {
+// Helper to clean up idle sessions (default: 10 minutes)
+async function cleanupIdleSessions(idleMs = 10 * 60 * 1000) {
   console.debug(`[Cleanup] Starting idle session cleanup, timeout: ${idleMs}ms`)
   
   const now = Date.now()
@@ -62,6 +62,8 @@ async function cleanupIdleSessions(idleMs = 60 * 60 * 1000) {
   const uploadsDir = process.env.UPLOADS_DIR || path.join(process.cwd(), "uploads")
   
   let cleaned = 0
+  
+  // Clean up sessions based on metadata
   for (const [sessionId, meta] of sessionMetaStore.entries()) {
     if (now - meta.lastActivity > idleMs) {
       console.debug(`[Cleanup] Found idle session: ${sessionId}, last activity: ${new Date(meta.lastActivity).toISOString()}`)
@@ -88,23 +90,50 @@ async function cleanupIdleSessions(idleMs = 60 * 60 * 1000) {
     }
   }
   
-  console.debug(`[Cleanup] Completed idle cleanup, sessions cleaned: ${cleaned}`)
+  // Also clean up any orphaned files older than 1 hour (aggressive cleanup for abandoned files)
+  try {
+    const files = await fs.readdir(uploadsDir)
+    const oneHourAgo = now - (60 * 60 * 1000) // 1 hour
+    
+    for (const file of files) {
+      const filePath = path.join(uploadsDir, file)
+      try {
+        const stats = await fs.stat(filePath)
+        if (stats.mtime.getTime() < oneHourAgo) {
+          await fs.unlink(filePath)
+          console.debug(`[Cleanup] Deleted old orphaned file: ${file}`)
+          cleaned++
+        }
+      } catch (error) {
+        console.error(`[Cleanup] Error checking/deleting orphaned file ${file}:`, error)
+      }
+    }
+  } catch (error) {
+    console.error('[Cleanup] Error during orphaned file cleanup:', error)
+  }
+  
+  console.debug(`[Cleanup] Completed idle cleanup, total items cleaned: ${cleaned}`)
   return cleaned
 }
 
 export async function POST() {
   console.debug('[Cleanup] Starting cleanup request')
   
-  // Clean up idle sessions (default: 1 hour)
+  // Clean up idle sessions first (default: 10 minutes) and orphaned files (1+ hours old)
   const idleCleaned = await cleanupIdleSessions()
   
   // Get sessionId from cookie
   const sessionId = cookies().get("sessionId")?.value
   if (!sessionId) {
-    console.debug('[Cleanup] No sessionId found in cookies')
+    console.debug('[Cleanup] No sessionId found in cookies, only idle cleanup performed')
     return NextResponse.json(
-      { success: false, error: "No sessionId found in cookies.", idleCleaned }, 
-      { status: 400 }
+      { 
+        success: true, 
+        message: "Idle cleanup completed", 
+        idleCleaned,
+        currentSession: null 
+      }, 
+      { status: 200 }
     )
   }
   
@@ -123,6 +152,7 @@ export async function POST() {
     uploads: uploadsResult,
     documentStore: docStoreResult,
     idleCleaned,
+    currentSession: sessionId,
     message: `Uploads and document store cleared for session ${sessionId}. Idle sessions cleaned: ${idleCleaned}`
   })
 }

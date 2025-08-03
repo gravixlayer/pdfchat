@@ -13,6 +13,7 @@ const ALLOWED_TYPES = [
   "application/pdf",
   "application/msword",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "text/plain",
 ]
 
 export async function POST(request: NextRequest) {
@@ -22,7 +23,10 @@ export async function POST(request: NextRequest) {
     let sessionId = cookies().get("sessionId")?.value
     if (!sessionId) {
       sessionId = crypto.randomUUID()
+      console.log("Generated new sessionId:", sessionId)
       cookies().set("sessionId", sessionId, { httpOnly: true, sameSite: "lax", path: "/" })
+    } else {
+      console.log("Using existing sessionId:", sessionId)
     }
 
     const formData = await request.formData()
@@ -47,7 +51,7 @@ export async function POST(request: NextRequest) {
     if (!ALLOWED_TYPES.includes(file.type)) {
       return NextResponse.json(
         {
-          error: "Only PDF and DOC files are allowed",
+          error: "Only PDF, DOC, DOCX, and TXT files are allowed",
           receivedType: file.type,
         },
         { status: 400 },
@@ -92,37 +96,23 @@ export async function POST(request: NextRequest) {
     console.log("Starting document processing...")
     let processResult
     try {
-      // Use internal base URL for server-side fetches to avoid SSL errors on Render
-      const baseUrl = process.env.INTERNAL_BASE_URL || "http://localhost:10000"
-      console.log("[DEBUG] Using baseUrl for internal fetch:", baseUrl)
-
-      const processResponse = await fetch(`${baseUrl}/api/process-document`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
+      // Import and call the process-document handler directly
+      const { POST: processDocument } = await import('../process-document/route')
+      
+      // Create a mock request for the process-document endpoint
+      const processRequest = {
+        json: async () => ({
           sessionId,
           fileId,
           filename: file.name,
           filepath,
           fileType: file.type,
-        }),
-      })
+        })
+      } as NextRequest
 
-      console.log("Process response status:", processResponse.status)
-
-      // Check if response is JSON
-      const contentType = processResponse.headers.get("content-type")
-      console.log("Process response content-type:", contentType)
-
-      if (!contentType || !contentType.includes("application/json")) {
-        // Response is not JSON, likely an error page
-        const errorText = await processResponse.text()
-        console.error("Non-JSON response from process-document:", errorText.substring(0, 500))
-        throw new Error("Document processing service returned an invalid response")
-      }
-
+      console.log("Calling process-document directly")
+      const processResponse = await processDocument(processRequest)
+      
       if (!processResponse.ok) {
         const errorData = await processResponse.json()
         console.error("Document processing failed:", errorData)
@@ -154,6 +144,7 @@ export async function POST(request: NextRequest) {
       size: file.size,
       type: file.type,
       chunks: processResult.chunks || 0,
+      sessionId, // Include sessionId in response for debugging
     })
   } catch (error) {
     console.error("Upload error:", error)

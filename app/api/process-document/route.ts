@@ -183,6 +183,44 @@ async function generateEmbeddings(texts: string[]): Promise<number[][]> {
   }
 }
 
+// Extract text from different file types
+async function extractTextFromFile(filepath: string, fileType: string): Promise<string> {
+  if (fileType === "application/pdf") {
+    return await extractTextFromPDF(filepath)
+  } else if (fileType === "text/plain") {
+    return await extractTextFromTXT(filepath)
+  } else if (fileType === "application/msword" || fileType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
+    // For now, we'll handle DOC files as plain text extraction
+    // In a production environment, you'd want to use libraries like mammoth for proper DOC/DOCX parsing
+    throw new Error("DOC/DOCX files are not yet supported. Please convert to PDF or TXT format.")
+  } else {
+    throw new Error(`Unsupported file type: ${fileType}`)
+  }
+}
+
+// Extract text from TXT files
+async function extractTextFromTXT(filepath: string): Promise<string> {
+  const startTime = Date.now()
+  try {
+    console.log("Extracting text from TXT file:", filepath)
+    const buffer = await readFile(filepath)
+    const text = buffer.toString('utf-8')
+    
+    const extractionTime = Date.now() - startTime
+    console.log(`TXT extraction completed in ${extractionTime}ms, text length: ${text.length}`)
+    
+    if (!text || text.trim().length === 0) {
+      throw new Error("TXT file appears to be empty")
+    }
+    
+    return text.trim()
+  } catch (error) {
+    const extractionTime = Date.now() - startTime
+    console.error(`TXT extraction failed after ${extractionTime}ms:`, error)
+    throw new Error("Failed to extract text from TXT file")
+  }
+}
+
 // PDF text extraction using pdf-ts
 async function extractTextFromPDF(filepath: string): Promise<string> {
   console.log("Starting PDF text extraction with pdf-ts...")
@@ -216,15 +254,11 @@ export async function POST(request: NextRequest) {
     let text = ""
     let warning: string | undefined = undefined
 
-    if (fileType === "application/pdf") {
-      try {
-        text = await extractTextFromPDF(filepath)
-      } catch (err: any) {
-        warning = err?.message || "PDF extraction failed"
-        text = ""
-      }
-    } else {
-      return NextResponse.json({ error: "Only PDF files are supported for now." }, { status: 400 })
+    try {
+      text = await extractTextFromFile(filepath, fileType)
+    } catch (err: any) {
+      warning = err?.message || "File extraction failed"
+      text = ""
     }
 
     if (!text || text.trim().length < 10) {
