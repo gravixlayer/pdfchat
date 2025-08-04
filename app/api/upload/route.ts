@@ -1,7 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { cookies } from "next/headers"
-import { writeFile, mkdir } from "fs/promises"
-import { existsSync } from "fs"
+import { writeFile } from "fs/promises"
 import path from "path"
 import { v4 as uuidv4 } from "uuid"
 
@@ -58,14 +57,9 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Create uploads directory if it doesn't exist
-    const uploadsDir = path.join(process.cwd(), "uploads")
-    if (!existsSync(uploadsDir)) {
-      await mkdir(uploadsDir, { recursive: true })
-      console.log("Created uploads directory:", uploadsDir)
-    }
-
-
+    // Use Vercel's /tmp directory for temporary file storage
+    const uploadsDir = "/tmp"
+    
     // Generate unique filename with sessionId prefix for tracking
     const fileId = uuidv4()
     const extension = path.extname(file.name)
@@ -74,12 +68,12 @@ export async function POST(request: NextRequest) {
 
     console.log("Saving file to:", filepath)
 
-    // Save file
+    // Save file to /tmp directory
     try {
       const bytes = await file.arrayBuffer()
       const buffer = Buffer.from(bytes)
       await writeFile(filepath, buffer)
-      console.log("File saved successfully")
+      console.log("File saved successfully to /tmp")
     } catch (saveError) {
       console.error("File save error:", saveError)
       return NextResponse.json(

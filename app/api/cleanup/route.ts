@@ -3,28 +3,26 @@ import { cookies } from "next/headers"
 import fs from "fs/promises"
 import path from "path"
 
-// Helper to clear uploads directory for a session
-async function clearUploadsDirForSession(sessionId: string) {
-  // Use environment variable for uploads directory on Render
-  const uploadsDir = process.env.UPLOADS_DIR || path.join(process.cwd(), "uploads")
+// Helper to clear temporary files for a session
+async function clearTempFilesForSession(sessionId: string) {
+  // Use /tmp directory for Vercel serverless environment
+  const tempDir = "/tmp"
   let deleted = 0
   try {
-    // Ensure directory exists
-    await fs.mkdir(uploadsDir, { recursive: true })
-    console.debug(`[Cleanup] Checking directory: ${uploadsDir}`)
+    console.debug(`[Cleanup] Checking directory: ${tempDir}`)
 
-    const files = await fs.readdir(uploadsDir)
+    const files = await fs.readdir(tempDir)
     for (const file of files) {
       if (file.startsWith(sessionId + "__")) {
-        const filePath = path.join(uploadsDir, file)
+        const filePath = path.join(tempDir, file)
         await fs.unlink(filePath)
         deleted++
-        console.debug(`[Cleanup] Deleted file: ${file}`)
+        console.debug(`[Cleanup] Deleted temp file: ${file}`)
       }
     }
     return { deleted }
   } catch (err) {
-    console.error("[Cleanup] Error clearing uploads:", err)
+    console.error("[Cleanup] Error clearing temp files:", err)
     return { deleted, error: err instanceof Error ? err.message : String(err) }
   }
 }
@@ -59,7 +57,7 @@ async function cleanupIdleSessions(idleMs = 10 * 60 * 1000) {
   const now = Date.now()
   const sessionMetaStore = ((globalThis as any).sessionMetaStore as Map<string, { lastActivity: number }>) || new Map()
   const documentStore = ((globalThis as any).documentStore as Map<string, Map<string, any>>) || new Map()
-  const uploadsDir = process.env.UPLOADS_DIR || path.join(process.cwd(), "uploads")
+  const tempDir = "/tmp"
   
   let cleaned = 0
   
@@ -68,12 +66,12 @@ async function cleanupIdleSessions(idleMs = 10 * 60 * 1000) {
     if (now - meta.lastActivity > idleMs) {
       console.debug(`[Cleanup] Found idle session: ${sessionId}, last activity: ${new Date(meta.lastActivity).toISOString()}`)
       
-      // Delete uploaded files for this session
+      // Delete temporary files for this session
       try {
-        const files = await fs.readdir(uploadsDir)
+        const files = await fs.readdir(tempDir)
         for (const file of files) {
           if (file.startsWith(sessionId + "__")) {
-            const filePath = path.join(uploadsDir, file)
+            const filePath = path.join(tempDir, file)
             await fs.unlink(filePath)
             console.debug(`[Cleanup] Deleted idle session file: ${file}`)
           }
@@ -92,11 +90,11 @@ async function cleanupIdleSessions(idleMs = 10 * 60 * 1000) {
   
   // Also clean up any orphaned files older than 1 hour (aggressive cleanup for abandoned files)
   try {
-    const files = await fs.readdir(uploadsDir)
+    const files = await fs.readdir(tempDir)
     const oneHourAgo = now - (60 * 60 * 1000) // 1 hour
     
     for (const file of files) {
-      const filePath = path.join(uploadsDir, file)
+      const filePath = path.join(tempDir, file)
       try {
         const stats = await fs.stat(filePath)
         if (stats.mtime.getTime() < oneHourAgo) {
@@ -139,20 +137,20 @@ export async function POST() {
   
   console.debug(`[Cleanup] Processing cleanup for session: ${sessionId}`)
   
-  // Delete uploaded files for this session
-  const uploadsResult = await clearUploadsDirForSession(sessionId)
+  // Delete temporary files for this session
+  const tempFilesResult = await clearTempFilesForSession(sessionId)
   
   // Clear in-memory vectors/session data for this session
   const docStoreResult = clearDocumentStoreForSession(sessionId)
 
-  console.debug('[Cleanup] Cleanup completed', { uploadsResult, docStoreResult, idleCleaned })
+  console.debug('[Cleanup] Cleanup completed', { tempFilesResult, docStoreResult, idleCleaned })
 
   return NextResponse.json({
     success: true,
-    uploads: uploadsResult,
+    tempFiles: tempFilesResult,
     documentStore: docStoreResult,
     idleCleaned,
     currentSession: sessionId,
-    message: `Uploads and document store cleared for session ${sessionId}. Idle sessions cleaned: ${idleCleaned}`
+    message: `Temporary files and document store cleared for session ${sessionId}. Idle sessions cleaned: ${idleCleaned}`
   })
 }
