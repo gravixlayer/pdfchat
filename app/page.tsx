@@ -458,10 +458,16 @@ export default function Page() {
       {/* Navigation Bar */}
       <nav className="w-full bg-black border-b border-[#2a2a2a] px-6 py-3 flex-shrink-0">
         <div className="flex items-center justify-between w-full">
-          {/* Left: Gravix Layer */}
-          <div className="text-white text-base font-medium tracking-wide flex-1">
+          {/* Left: Gravix Layer (hyperlink) */}
+          <a
+            href="https://gravixlayer.com/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex-1 text-white text-base font-semibold tracking-wide transition-all duration-200 underline underline-offset-2 decoration-[0.5px] decoration-white hover:decoration-white"
+            aria-label="Gravix Layer Website"
+          >
             Gravix Layer
-          </div>
+          </a>
           
           {/* Center: PDFCHAT */}
           <div className="text-white text-base font-bold tracking-tight bg-gradient-to-r from-white to-[#ccc] bg-clip-text">
